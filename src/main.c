@@ -131,7 +131,11 @@ int main(int argc, char **argv)
 
     Camera3D camera = { 0 };
     Vector3 center = ChunkCenter(&chunk);
-    camera.position = (Vector3){ center.x + 20.0f, center.y + 20.0f, center.z + 20.0f };
+    camera.position = (Vector3){
+        center.x + (float)chunk.size_x,
+        center.y + (float)chunk.size_y,
+        center.z + (float)chunk.size_z
+    };
     camera.target = center;
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     camera.fovy = 45.0f;
