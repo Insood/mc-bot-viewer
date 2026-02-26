@@ -139,6 +139,19 @@
             },
             "group": "build",
             "problemMatcher": []
+        },
+        {
+            "label": "build web (emscripten)",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "mkdir -p docs && make -C build/external/raylib-master/src PLATFORM=PLATFORM_WEB CC=emcc AR=emar RANLIB=emranlib && emcc -O2 -o docs/index.html src/main.c src/chunk.c -Iinclude -Ibuild/external/raylib-master/src -Lbuild/external/raylib-master/src -lraylib.web -DPLATFORM_WEB -s USE_GLFW=3 -s ASYNCIFY -s ALLOW_MEMORY_GROWTH=1 --preload-file resources --preload-file chunks"
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ]
         }
     ]
 }

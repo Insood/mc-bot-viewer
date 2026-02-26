@@ -267,12 +267,11 @@ int main(int argc, char **argv)
     Color block_colors[256];
 
     if (argc < 2) {
-        printf("Usage: %s path/to/chunk_directory\n", argv[0]);
-        printf("Example: %s chunks\n", argv[0]);
-        return 1;
+        dir = "chunks";
+        printf("No chunk directory provided. Defaulting to '%s'.\n", dir);
+    } else {
+        dir = argv[1];
     }
-
-    dir = argv[1];
     if (!LoadChunksFromDirectory(dir, &entries, &entry_count)) {
         printf("Failed to load any chunks from: %s\n", dir);
         return 1;
