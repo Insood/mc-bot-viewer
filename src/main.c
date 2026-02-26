@@ -152,7 +152,6 @@ int main(int argc, char **argv)
 
         BeginMode3D(camera);
         DrawChunkCubes(&chunk, block_colors);
-        DrawGrid(10, 1.0f);
         EndMode3D();
 
         DrawRectangle(10, 10, 340, 80, Fade(SKYBLUE, 0.5f));
