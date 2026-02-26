@@ -1,9 +1,17 @@
 #include "raylib.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
 #include "chunk.h"
+
+typedef struct ChunkEntry {
+    char *path;
+    Chunk chunk;
+} ChunkEntry;
 
 static Color ColorFrom01(float r, float g, float b)
 {
@@ -68,6 +76,142 @@ static void InitBlockColors(Color *colors)
     colors[49] = (Color){ 30, 10, 50, 255 }; // obsidian
 }
 
+static int HasChunkExtension(const char *name)
+{
+    size_t len = 0;
+    if (!name) {
+        return 0;
+    }
+    len = strlen(name);
+    return len >= 6 && strcmp(name + (len - 6), ".chunk") == 0;
+}
+
+static int IsRegularFile(const char *path)
+{
+    struct stat info;
+    if (!path) {
+        return 0;
+    }
+    if (stat(path, &info) != 0) {
+        return 0;
+    }
+    return S_ISREG(info.st_mode);
+}
+
+static char *JoinPath(const char *dir, const char *name)
+{
+    size_t dir_len = 0;
+    size_t name_len = 0;
+    size_t needs_sep = 0;
+    char *result = NULL;
+
+    if (!dir || !name) {
+        return NULL;
+    }
+
+    dir_len = strlen(dir);
+    name_len = strlen(name);
+    needs_sep = (dir_len > 0 && dir[dir_len - 1] != '/') ? 1 : 0;
+
+    result = (char *)malloc(dir_len + needs_sep + name_len + 1);
+    if (!result) {
+        return NULL;
+    }
+
+    memcpy(result, dir, dir_len);
+    if (needs_sep) {
+        result[dir_len] = '/';
+    }
+    memcpy(result + dir_len + needs_sep, name, name_len);
+    result[dir_len + needs_sep + name_len] = '\0';
+    return result;
+}
+
+static void FreeChunkEntries(ChunkEntry *entries, size_t count)
+{
+    if (!entries) {
+        return;
+    }
+
+    for (size_t i = 0; i < count; i += 1) {
+        ChunkFree(&entries[i].chunk);
+        free(entries[i].path);
+    }
+    free(entries);
+}
+
+static int LoadChunksFromDirectory(const char *dir, ChunkEntry **out_entries, size_t *out_count)
+{
+    DIR *handle = NULL;
+    struct dirent *entry = NULL;
+    ChunkEntry *entries = NULL;
+    size_t count = 0;
+    size_t capacity = 0;
+
+    if (!dir || !out_entries || !out_count) {
+        return 0;
+    }
+
+    handle = opendir(dir);
+    if (!handle) {
+        return 0;
+    }
+
+    while ((entry = readdir(handle)) != NULL) {
+        char *full_path = NULL;
+
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+
+        if (!HasChunkExtension(entry->d_name)) {
+            continue;
+        }
+
+        full_path = JoinPath(dir, entry->d_name);
+        if (!full_path) {
+            continue;
+        }
+
+        if (!IsRegularFile(full_path)) {
+            free(full_path);
+            continue;
+        }
+
+        if (count == capacity) {
+            size_t next_capacity = capacity == 0 ? 8 : capacity * 2;
+            ChunkEntry *next_entries = (ChunkEntry *)realloc(entries, next_capacity * sizeof(ChunkEntry));
+            if (!next_entries) {
+                free(full_path);
+                FreeChunkEntries(entries, count);
+                closedir(handle);
+                return 0;
+            }
+            entries = next_entries;
+            capacity = next_capacity;
+        }
+
+        if (!ChunkLoad(full_path, &entries[count].chunk)) {
+            free(full_path);
+            continue;
+        }
+
+        entries[count].path = full_path;
+        count += 1;
+    }
+
+    closedir(handle);
+
+    if (count == 0) {
+        FreeChunkEntries(entries, count);
+        return 0;
+    }
+
+    *out_entries = entries;
+    *out_count = count;
+    return 1;
+}
+
 static Vector3 ChunkCenter(const Chunk *chunk)
 {
     Vector3 center = { 0.0f, 0.0f, 0.0f };
@@ -104,21 +248,33 @@ static void DrawChunkCubes(const Chunk *chunk, const Color *colors)
     }
 }
 
+static const char *BaseName(const char *path)
+{
+    const char *slash = NULL;
+    if (!path) {
+        return "";
+    }
+    slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
 int main(int argc, char **argv)
 {
-    Chunk chunk;
-    const char *path = NULL;
+    ChunkEntry *entries = NULL;
+    size_t entry_count = 0;
+    size_t current_index = 0;
+    const char *dir = NULL;
     Color block_colors[256];
 
     if (argc < 2) {
-        printf("Usage: %s path/to/file.chunk\n", argv[0]);
-        printf("Example: %s chunks/example.chunk\n", argv[0]);
+        printf("Usage: %s path/to/chunk_directory\n", argv[0]);
+        printf("Example: %s chunks\n", argv[0]);
         return 1;
     }
 
-    path = argv[1];
-    if (!ChunkLoad(path, &chunk)) {
-        printf("Failed to load chunk: %s\n", path);
+    dir = argv[1];
+    if (!LoadChunksFromDirectory(dir, &entries, &entry_count)) {
+        printf("Failed to load any chunks from: %s\n", dir);
         return 1;
     }
 
@@ -130,11 +286,11 @@ int main(int argc, char **argv)
     InitWindow(screenWidth, screenHeight, "Chunk Viewer");
 
     Camera3D camera = { 0 };
-    Vector3 center = ChunkCenter(&chunk);
+    Vector3 center = ChunkCenter(&entries[current_index].chunk);
     camera.position = (Vector3){
-        center.x + (float)chunk.size_x,
-        center.y + (float)chunk.size_y,
-        center.z + (float)chunk.size_z
+        center.x + (float)entries[current_index].chunk.size_x,
+        center.y + (float)entries[current_index].chunk.size_y,
+        center.z + (float)entries[current_index].chunk.size_z
     };
     camera.target = center;
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
@@ -151,24 +307,37 @@ int main(int argc, char **argv)
             camera.target = center;
         }
 
+        if (IsKeyPressed(KEY_SPACE)) {
+            current_index = (current_index + 1) % entry_count;
+            center = ChunkCenter(&entries[current_index].chunk);
+            camera.position = (Vector3){
+                center.x + (float)entries[current_index].chunk.size_x,
+                center.y + (float)entries[current_index].chunk.size_y,
+                center.z + (float)entries[current_index].chunk.size_z
+            };
+            camera.target = center;
+        }
+
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
         BeginMode3D(camera);
-        DrawChunkCubes(&chunk, block_colors);
+        DrawChunkCubes(&entries[current_index].chunk, block_colors);
         EndMode3D();
 
-        DrawRectangle(10, 10, 340, 80, Fade(SKYBLUE, 0.5f));
-        DrawRectangleLines(10, 10, 340, 80, BLUE);
+        DrawRectangle(10, 10, 360, 115, Fade(SKYBLUE, 0.5f));
+        DrawRectangleLines(10, 10, 360, 115, BLUE);
         DrawText("Free camera controls:", 20, 20, 10, BLACK);
         DrawText("- Mouse Wheel to Zoom in-out", 40, 40, 10, DARKGRAY);
         DrawText("- Mouse Wheel Pressed to Pan", 40, 60, 10, DARKGRAY);
         DrawText("- Z to focus center", 40, 80, 10, DARKGRAY);
+        DrawText("- SPACE to next chunk", 40, 100, 10, DARKGRAY);
+        DrawText(BaseName(entries[current_index].path), 20, 115, 10, BLACK);
 
         EndDrawing();
     }
 
     CloseWindow();
-    ChunkFree(&chunk);
+    FreeChunkEntries(entries, entry_count);
     return 0;
 }
